@@ -102,10 +102,11 @@ def extract_prices(text: str) -> str:
 
 
 def extract_status(text: str) -> str:
+    text_lower = text.lower()
     best_pos = None
     best_status = "NEZNAME"
     for keyword in STATUS_KEYWORDS:
-        match = re.search(re.escape(keyword), text)
+        match = re.search(re.escape(keyword.lower()), text_lower)
         if match and (best_pos is None or match.start() < best_pos):
             best_pos = match.start()
             best_status = keyword
