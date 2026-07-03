@@ -93,7 +93,11 @@ def get_page_text(url: str) -> str:
 
 
 def extract_prices(text: str) -> str:
-    found = [normalize_price(m.group()) for m in PRICE_PATTERN.finditer(text)]
+    found = []
+    for line in text.split("\n"):
+        for m in PRICE_PATTERN.finditer(line):
+            found.append(normalize_price(m.group()))
+
     seen = set()
     unique = []
     for price in found:
