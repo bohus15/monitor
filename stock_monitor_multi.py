@@ -87,7 +87,9 @@ def get_page_text(url: str) -> str:
     soup = BeautifulSoup(resp.text, "html.parser")
     for tag in soup(["script", "style"]):
         tag.decompose()
-    return soup.get_text(" ", strip=True)
+    # separator "\n" zachova hranice riadkov/blokov, aby sme vedeli
+    # oddelit "Dostupnost: X" od nasledujuceho odstavca/poznamky
+    return soup.get_text("\n", strip=True)
 
 
 def extract_prices(text: str) -> str:
@@ -101,7 +103,44 @@ def extract_prices(text: str) -> str:
     return " | ".join(unique) if unique else "ZIADNA CENA NAJDENA"
 
 
+# Labely, za ktorymi realne nasleduje stav DANEHO produktu (nie odporucanych
+# produktov ani inych casti stranky). Ak sa najde label, berie sa text hned
+# za nim - to je presnejsie ako hladat kluc. slovo kdekolvek na cele stranke.
+AVAILABILITY_LABELS = [
+    "dostupnosť",
+    "dostupnost",
+    "skladová dostupnosť",
+    "skladova dostupnost",
+]
+
+
 def extract_status(text: str) -> str:
+    lines = text.split("\n")
+
+    # 1) presnejsi sposob: najdi RIADOK obsahujuci label "Dostupnost:" a
+    # zober iba zvysok TOHO ISTEHO riadku (nepreteka do dalsich odsekov)
+    for line in lines:
+        line_lower = line.lower()
+        for label in AVAILABILITY_LABELS:
+            idx = line_lower.find(label)
+            if idx != -1:
+                after = line[idx + len(label):].lstrip(" :\t").strip()
+                if after:
+                    return after
+                # ak je label na konci riadku, hodnota moze byt na dalsom riadku
+                # (niektore stranky renderuju label a hodnotu oddelene)
+
+    # 1b) ak label najdeny na konci riadku bez hodnoty, skus najst hodnotu
+    # v ramci nasledujuceho neprazdneho riadku
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        for label in AVAILABILITY_LABELS:
+            if line_lower.rstrip().endswith(label) or line_lower.rstrip().endswith(label + ":"):
+                for next_line in lines[i + 1:]:
+                    if next_line.strip():
+                        return next_line.strip()
+
+    # 2) fallback: ak label nenajdeny nikde, hladaj kluc. slovo kdekolvek
     text_lower = text.lower()
     best_pos = None
     best_status = "NEZNAME"
