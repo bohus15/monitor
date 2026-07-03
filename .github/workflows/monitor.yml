@@ -5,8 +5,10 @@ on:
     - cron: '*/5 * * * *'
   workflow_dispatch:
 
+
 permissions:
   contents: write
+
 
 jobs:
   check-stock:
@@ -36,3 +38,4 @@ jobs:
           git add last_state.json
           git diff --staged --quiet || git commit -m "update stock state"
           git push
+
