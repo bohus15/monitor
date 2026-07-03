@@ -1,24 +1,19 @@
 """
-Stock Monitor - sledovanie podla ZMENY CENY (nie textu dostupnosti)
+Stock Monitor - KOMBINOVANE sledovanie CENY aj TEXTU dostupnosti
 -----------------------------------------------------------------------
-Funguje bez ohladu na jazyk e-shopu (CZ/SK). Predobjednavkove produkty
-maju typicky "placeholder" cenu (napr. "1 Kc" na Cardstore.cz alebo
-"0,00 e" na Vesely-drak.sk), ktora sa zmeni na realnu cenu, ked sa
-produkt da skutocne kupit / otvori sa predobjednavka.
+Sleduje obe veci naraz, aby sa neprepasla zmena, ak e-shop aktualizuje
+len jednu z nich (napr. zmeni cenu, ale este chvilu neprepne text,
+alebo naopak):
 
-Skript porovna, ci sa NAJDENE CENY na stranke zmenili oproti poslednej
-kontrole. Ak ano, posle Discord notifikaciu (aj s hodnotami starej a
-novej ceny).
+1) CENA - hlada vzory ako "1 Kč", "12 990 Kč", "0,00 €", "799,96 €"
+2) TEXT STAVU - hlada slova ako "Skladom", "Skladem", "Nedostupné",
+   "Připravujeme", "Predobjednávka" atd. (CZ aj SK varianty)
+
+Ak sa zmeni CO I LEN JEDNO z toho oproti poslednemu behu, posle sa
+Discord notifikacia, ktora uvedie, co presne sa zmenilo.
 
 POZNAMKA: notifikacia sa posle aj pri UPLNE PRVOM behu pre kazdy
-produkt (aby bolo hned vidiet, ze vsetko funguje). Pri dalsich behoch
-uz prichadza notifikacia len pri skutocnej zmene ceny.
-
-Pozor: na strankach so ZOZNAMOM viacerych produktov (napr. filtrovany
-vypis) skript sleduje VSETKY ceny na stranke naraz ako jeden celok.
-Ak sa zmeni cena len JEDNEHO produktu zo zoznamu, dostanes notifikaciu,
-ale skript ti nepovie presne KTORY produkt to bol - to uz treba
-skontrolovat rucne na stranke.
+produkt (aby bolo hned vidiet, ze vsetko funguje).
 
 products.json format:
 [
@@ -48,6 +43,22 @@ HEADERS = {
 # Zachytava ceny typu "1 Kč", "12 990 Kč", "0,00 €", "799,96 €"
 PRICE_PATTERN = re.compile(r"\d[\d\s.,]*\s?(?:Kč|€)")
 
+# CZ aj SK varianty stavovych textov, v poradi podla priority vyskytu
+STATUS_KEYWORDS = [
+    "Skladom",
+    "Skladem",
+    "Dostupné",
+    "Na otázku",
+    "Na dotaz",
+    "Predobjednávka",
+    "Předobjednávka",
+    "Pripravujeme",
+    "Připravujeme",
+    "Nedostupné",
+    "Vypredané",
+    "Vyprodáno",
+]
+
 
 def load_products() -> list:
     with open(PRODUCTS_FILE, "r", encoding="utf-8") as f:
@@ -70,24 +81,35 @@ def normalize_price(raw: str) -> str:
     return re.sub(r"\s+", " ", raw).strip()
 
 
-def get_prices(url: str) -> list:
+def get_page_text(url: str) -> str:
     resp = requests.get(url, headers=HEADERS, timeout=15)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
-
     for tag in soup(["script", "style"]):
         tag.decompose()
+    return soup.get_text(" ", strip=True)
 
-    text = soup.get_text(" ", strip=True)
+
+def extract_prices(text: str) -> str:
     found = [normalize_price(m.group()) for m in PRICE_PATTERN.finditer(text)]
-
     seen = set()
     unique = []
     for price in found:
         if price not in seen:
             seen.add(price)
             unique.append(price)
-    return unique
+    return " | ".join(unique) if unique else "ZIADNA CENA NAJDENA"
+
+
+def extract_status(text: str) -> str:
+    best_pos = None
+    best_status = "NEZNAME"
+    for keyword in STATUS_KEYWORDS:
+        match = re.search(re.escape(keyword), text)
+        if match and (best_pos is None or match.start() < best_pos):
+            best_pos = match.start()
+            best_status = keyword
+    return best_status
 
 
 def send_discord_notification(message: str) -> None:
@@ -108,26 +130,36 @@ def main() -> None:
         url = product["url"]
 
         try:
-            current_prices = get_prices(url)
+            page_text = get_page_text(url)
         except requests.RequestException as e:
             print(f"[{name}] Chyba pri nacitavani stranky: {e}")
             continue
 
-        current_key = " | ".join(current_prices) if current_prices else "ZIADNA CENA NAJDENA"
-        last_key = state.get(name)
+        current_price = extract_prices(page_text)
+        current_status = extract_status(page_text)
 
-        print(f"[{name}] Aktualne ceny: {current_key}")
-        print(f"[{name}] Posledne ceny:  {last_key}")
+        last = state.get(name, {})
+        last_price = last.get("price")
+        last_status = last.get("status")
 
-        if current_key != last_key:
+        print(f"[{name}] Cena: {current_price} | Stav: {current_status}")
+        print(f"[{name}] (predtym: {last_price} | {last_status})")
+
+        price_changed = current_price != last_price
+        status_changed = current_status != last_status
+
+        if price_changed or status_changed:
+            changes = []
+            if price_changed:
+                changes.append(f"💰 Cena: {last_price} → {current_price}")
+            if status_changed:
+                changes.append(f"📦 Stav: {last_status} → {current_status}")
+
             send_discord_notification(
-                f"🟢 **{name}** - zmena ceny/dostupnosti!\n"
-                f"{url}\n"
-                f"Predtym: {last_key}\n"
-                f"Teraz: {current_key}"
+                f"🟢 **{name}** - zmena!\n{url}\n" + "\n".join(changes)
             )
 
-        state[name] = current_key
+        state[name] = {"price": current_price, "status": current_status}
 
     save_last_state(state)
 
