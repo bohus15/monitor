@@ -2,12 +2,11 @@ name: Stock Monitor
 
 on:
   schedule:
-    # spusti sa kazdych 5 minut (GitHub negarantuje presny cas, realne to moze byt aj o par minut neskor)
-    - cron: "*/5 * * * *"
-  workflow_dispatch:  # umoznuje aj rucne spustenie tlacidlom na GitHub-e
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 permissions:
-  contents: write  # potrebne, aby workflow mohol commitnut last_state.json spat do repa
+  contents: write
 
 jobs:
   check-stock:
@@ -19,7 +18,7 @@ jobs:
       - name: Nastavenie Pythonu
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
 
       - name: Instalacia kniznic
         run: pip install requests beautifulsoup4
