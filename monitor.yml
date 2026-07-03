@@ -1,0 +1,39 @@
+name: Stock Monitor
+
+on:
+  schedule:
+    # spusti sa kazdych 5 minut (GitHub negarantuje presny cas, realne to moze byt aj o par minut neskor)
+    - cron: "*/5 * * * *"
+  workflow_dispatch:  # umoznuje aj rucne spustenie tlacidlom na GitHub-e
+
+permissions:
+  contents: write  # potrebne, aby workflow mohol commitnut last_state.json spat do repa
+
+jobs:
+  check-stock:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repozitara
+        uses: actions/checkout@v4
+
+      - name: Nastavenie Pythonu
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalacia kniznic
+        run: pip install requests beautifulsoup4
+
+      - name: Spustenie kontroly
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+        run: python stock_monitor_multi.py
+
+      - name: Ulozenie stavu spat do repozitara
+        run: |
+          git config user.name "stock-monitor-bot"
+          git config user.email "actions@github.com"
+          git add last_state.json
+          git diff --staged --quiet || git commit -m "update stock state"
+          git push
