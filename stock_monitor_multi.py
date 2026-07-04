@@ -117,6 +117,38 @@ def normalize_price(raw: str) -> str:
     return re.sub(r"\s+", " ", raw).strip()
 
 
+# Frazy, ktore oznamuju ZACIATOK sekcie s INYMI produktmi (cross-sell,
+# "s tymto produktom kupuju aj", suvisiace produkty a pod.). Tieto sekcie
+# obsahuju CENY INYCH produktov, ktore by inak kontaminovali cenu nasho
+# sledovaneho produktu (vid Vesely Drak - "S týmto produktom užívatelia
+# nakupujú" so 5 dalsimi cenami). Ak sa najde niektora z tychto fraz,
+# vsetko za nou sa oreze a do hladania ceny/stavu sa uz nezapocitava.
+STOP_MARKERS = [
+    "s týmto produktom",
+    "s tímto produktem",
+    "súvisiace produkty",
+    "související produkty",
+    "podobné produkty",
+    "zákazníci si tiež kúpili",
+    "zákazníci si také koupili",
+    "klienci, którzy kupili",
+    "polecane produkty",
+    "powiązane produkty",
+    "inni klienci kupili także",
+    "producenci",
+]
+
+
+def cut_at_stop_marker(text: str) -> str:
+    lower = text.lower()
+    cut_idx = None
+    for marker in STOP_MARKERS:
+        idx = lower.find(marker)
+        if idx != -1 and (cut_idx is None or idx < cut_idx):
+            cut_idx = idx
+    return text[:cut_idx] if cut_idx is not None else text
+
+
 def get_page(url: str):
     resp = requests.get(url, headers=HEADERS, timeout=15)
     resp.raise_for_status()
@@ -143,6 +175,8 @@ def get_page(url: str):
             idx = text.find(h1_text)
             if idx != -1:
                 text = text[idx:]
+
+    text = cut_at_stop_marker(text)
 
     return soup, text
 
