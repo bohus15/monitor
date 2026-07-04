@@ -42,5 +42,21 @@
   "Ihrysko - Ultra Premium Collection Day (Espeon)": {
     "price": "70,00 € | 3,59 €",
     "status": "tohto produktu je určený lim"
+  },
+  "Vesely Drak - Ultra Premium Collection Day": {
+    "price": "0.00 €",
+    "status": "na otázku"
+  },
+  "Vesely Drak - Ultra Premium Collection Night": {
+    "price": "0.00 €",
+    "status": "na otázku"
+  },
+  "Vesely Drak - Booster Bundle": {
+    "price": "0.00 €",
+    "status": "na otázku"
+  },
+  "Vesely Drak - Elite Trainer Box": {
+    "price": "0.00 €",
+    "status": "na otázku"
   }
 }
