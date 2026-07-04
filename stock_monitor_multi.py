@@ -89,7 +89,7 @@ def normalize_price(raw: str) -> str:
 def get_page_text(url: str) -> str:
     resp = requests.get(url, headers=HEADERS, timeout=15)
     resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(resp.text, "lxml")
     for tag in soup(["script", "style"]):
         tag.decompose()
 
@@ -123,14 +123,28 @@ PRICE_LINE_BLACKLIST = ["doprav", "przesyłk", "wysyłk", "shipping"]
 def extract_prices_from_attributes(soup) -> list:
     # Najspolahlivejsi sposob: viacere e-shopy pouzivaju strukturovany
     # atribut data-price priamo na elemente s cenou (napr. Loficards.pl).
-    # Toto je presnejsie ako hladanie textu, kedze sa netreba spoliehat
-    # na to, ci nahodou nie je niekde inde na stranke podobne vyzerajuci
-    # text (kosik, doprava, odporucane produkty...).
+    # Ale POZOR: data-price maju aj UPLNE INE veci na stranke (doprava,
+    # hmotnost, mnozstevne tabulky zliav...), preto sa akceptuje LEN ak:
+    #   1) viditelny text elementu naozaj vyzera ako cena s menou (Kč/€/zł)
+    #   2) v okoli (rodicovske elementy) sa nespomina doprava/przesylka/atd.
     found = []
     for tag in soup.find_all(attrs={"data-price": True}):
         txt = tag.get_text(" ", strip=True)
-        if txt:
-            found.append(normalize_price(txt))
+        if not txt or not PRICE_PATTERN.search(txt):
+            continue  # text neobsahuje menu -> pravdepodobne nie je cena produktu
+
+        # skontroluj kontext (LEN najblizsi rodic, nie viac urovni - inak
+        # by sme sa mohli dostat az po <body>, ktory obsahuje text CELEJ
+        # stranky vratane vzdialenej sekcie o doprave, co by sposobilo
+        # false-positive vylucenie aj spravnej ceny produktu)
+        context_parts = [txt]
+        if tag.parent is not None:
+            context_parts.append(tag.parent.get_text(" ", strip=True))
+        context_text = " ".join(context_parts).lower()
+        if any(bad in context_text for bad in PRICE_LINE_BLACKLIST):
+            continue
+
+        found.append(normalize_price(txt))
 
     seen = set()
     unique = []
