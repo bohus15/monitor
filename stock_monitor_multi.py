@@ -156,12 +156,12 @@ def extract_prices_from_attributes(soup) -> list:
 
 
 def extract_prices(soup, text: str) -> str:
-    # 1) prioritne skus strukturovany atribut data-price
-    attr_prices = extract_prices_from_attributes(soup)
-    if attr_prices:
-        return " | ".join(attr_prices)
-
-    # 2) fallback: hladanie v texte po riadkoch (s vylucenim dopravy atd.)
+    # POZNAMKA: atributova metoda (data-price) sa vypnula - ukazalo sa,
+    # ze rozne stranky maju velmi rozne vzdialenosti medzi cenou produktu
+    # a "sumovym" textom (doprava, hmotnost...) v HTML strome, cim sa
+    # nedalo spolahlivo univerzalne nastavit, kolko urovni rodicov
+    # kontrolovat. Riadkove hladanie v texte je robustnejsie, kedze
+    # doprava/vaha sa typicky zobrazuje na INOM riadku/bloku nez cena.
     found = []
     for line in text.split("\n"):
         line_lower = line.lower()
