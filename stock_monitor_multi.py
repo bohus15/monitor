@@ -25,6 +25,7 @@ import os
 import re
 import json
 import requests
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 DISCORD_WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
@@ -42,6 +43,36 @@ HEADERS = {
 
 # Zachytava ceny typu "1 Kč", "12 990 Kč", "0,00 €", "799,96 €", "0,01 zł"
 PRICE_PATTERN = re.compile(r"\d[\d\s.,]*\s?(?:Kč|€|zł)")
+
+# Niektore e-shopy (napr. loficards.pl - Sky-Shop platforma) vykresluju cenu
+# ako HOLE cislo bez meny v HTML/texte (mena sa dokresluje cez CSS/JS a teda
+# nie je vidno v texte stranky). Pre take pripady pouzivame fallback: hladame
+# RIADOK, ktory obsahuje LEN cislo s desatinnou ciarkou/bodkou (napr. "0.01",
+# "199,99") a k nemu dopiseme menu podla domeny. Cele cisla bez desatiny
+# (napr. "15", "18" - casto poplatky za dopravu) sa NEBERU, aby sme
+# nezachytili nahodne ine hodnoty.
+BARE_PRICE_PATTERN = re.compile(r"^\d+[.,]\d{1,2}$")
+
+# Mena podla domeny/TLD - pouziva sa len pre fallback BARE_PRICE_PATTERN
+CURRENCY_BY_DOMAIN = {
+    "loficards.pl": "zł",
+}
+CURRENCY_BY_TLD = {
+    ".cz": "Kč",
+    ".sk": "€",
+    ".pl": "zł",
+}
+
+
+def guess_currency(url: str) -> str:
+    netloc = urlparse(url).netloc.lower()
+    for domain, currency in CURRENCY_BY_DOMAIN.items():
+        if domain in netloc:
+            return currency
+    for tld, currency in CURRENCY_BY_TLD.items():
+        if netloc.endswith(tld):
+            return currency
+    return "€"
 
 # CZ aj SK varianty stavovych textov, v poradi podla priority vyskytu
 STATUS_KEYWORDS = [
@@ -86,89 +117,33 @@ def normalize_price(raw: str) -> str:
     return re.sub(r"\s+", " ", raw).strip()
 
 
-def get_page_text(url: str) -> str:
+def get_page(url: str):
     resp = requests.get(url, headers=HEADERS, timeout=15)
     resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup = BeautifulSoup(resp.text, "html.parser")
     for tag in soup(["script", "style"]):
         tag.decompose()
-
-    # odstranenie widgetov kosika (napr. Angular "priceSummary"/"cartSelected"
-    # v hlavicke stranky) - zobrazuju cenu OBSAHU KOSIKA (typicky 0,00 kym je
-    # prazdny), nie cenu produktu, a bez tejto ochrany by sa s nou zamienali.
-    # POZOR: najprv sa MUSIA zozbierat vsetky tagy na odstranenie do zoznamu
-    # a decompose() zavolat AZ POTOM - inak by decompose() vycistil aj
-    # atributy vnorenych potomkov skor, nez sa k nim cyklus dostane, co
-    # sposobi AttributeError (tag.attrs == None).
-    cart_markers = ("pricesummary", "cartselected", "cart-summary", "minicart")
-    tags_to_remove = []
-    for tag in soup.find_all(True):
-        attrs_text = " ".join(str(v) for v in tag.attrs.values()).lower()
-        if any(marker in attrs_text for marker in cart_markers):
-            tags_to_remove.append(tag)
-    for tag in tags_to_remove:
-        tag.decompose()
-
     # separator "\n" zachova hranice riadkov/blokov, aby sme vedeli
     # oddelit "Dostupnost: X" od nasledujuceho odstavca/poznamky
     text = soup.get_text("\n", strip=True)
     return soup, text
 
 
-# Riadky obsahujuce tieto slova sa PRESKOCIA pri hladani ceny - typicky
-# ide o cenu dopravy / prah pre zadarmo dopravu, nie o cenu produktu
-PRICE_LINE_BLACKLIST = ["doprav", "przesyłk", "wysyłk", "shipping"]
-
-
-def extract_prices_from_attributes(soup) -> list:
-    # Najspolahlivejsi sposob: viacere e-shopy pouzivaju strukturovany
-    # atribut data-price priamo na elemente s cenou (napr. Loficards.pl).
-    # Ale POZOR: data-price maju aj UPLNE INE veci na stranke (doprava,
-    # hmotnost, mnozstevne tabulky zliav...), preto sa akceptuje LEN ak:
-    #   1) viditelny text elementu naozaj vyzera ako cena s menou (Kč/€/zł)
-    #   2) v okoli (rodicovske elementy) sa nespomina doprava/przesylka/atd.
-    found = []
-    for tag in soup.find_all(attrs={"data-price": True}):
-        txt = tag.get_text(" ", strip=True)
-        if not txt or not PRICE_PATTERN.search(txt):
-            continue  # text neobsahuje menu -> pravdepodobne nie je cena produktu
-
-        # skontroluj kontext (LEN najblizsi rodic, nie viac urovni - inak
-        # by sme sa mohli dostat az po <body>, ktory obsahuje text CELEJ
-        # stranky vratane vzdialenej sekcie o doprave, co by sposobilo
-        # false-positive vylucenie aj spravnej ceny produktu)
-        context_parts = [txt]
-        if tag.parent is not None:
-            context_parts.append(tag.parent.get_text(" ", strip=True))
-        context_text = " ".join(context_parts).lower()
-        if any(bad in context_text for bad in PRICE_LINE_BLACKLIST):
-            continue
-
-        found.append(normalize_price(txt))
-
-    seen = set()
-    unique = []
-    for price in found:
-        if price not in seen:
-            seen.add(price)
-            unique.append(price)
-    return unique
-
-
-def extract_prices(soup, text: str) -> str:
-    # POZNAMKA: atributova metoda (data-price) sa vypnula - ukazalo sa,
-    # ze rozne stranky maju velmi rozne vzdialenosti medzi cenou produktu
-    # a "sumovym" textom (doprava, hmotnost...) v HTML strome, cim sa
-    # nedalo spolahlivo univerzalne nastavit, kolko urovni rodicov
-    # kontrolovat. Riadkove hladanie v texte je robustnejsie, kedze
-    # doprava/vaha sa typicky zobrazuje na INOM riadku/bloku nez cena.
+def extract_prices(text: str, url: str = "") -> str:
     found = []
     for line in text.split("\n"):
-        line_lower = line.lower()
-        if any(bad in line_lower for bad in PRICE_LINE_BLACKLIST):
-            continue
         for m in PRICE_PATTERN.finditer(line):
             found.append(normalize_price(m.group()))
+
+    if not found:
+        # Fallback pre e-shopy, ktore vykresluju cenu ako hole cislo bez
+        # meny v texte (mena je dokreslena len vizualne cez CSS/JS a v HTML
+        # texte ju vobec nevidno - typicky napr. loficards.pl).
+        currency = guess_currency(url)
+        for line in text.split("\n"):
+            line = line.strip()
+            if BARE_PRICE_PATTERN.match(line):
+                found.append(normalize_price(f"{line} {currency}"))
 
     seen = set()
     unique = []
@@ -230,6 +205,49 @@ def extract_status(text: str) -> str:
     return best_status
 
 
+def extract_ihrysko(soup: BeautifulSoup):
+    """
+    Ihrysko.sk ma na stranke VELA textu, ktory nahodne obsahuje slovo
+    "dostupnosť" (napr. vo vete "Vzhľadom na nižšiu dostupnosť tohto
+    produktu je určený limit 1ks na zákazníka.") a tiez viacero cien
+    naraz (cena produktu, cena dopravy, hranica pre dopravu zadarmo).
+    Preto sa tu NEPOUZIVA generic text-scan cez celu stranku, ale sa
+    ide priamo do konkretneho HTML bloku s cenou/dostupnostou
+    (div.product-pricing), ktory je unikatny pre hlavny produkt.
+    """
+    price = "ZIADNA CENA NAJDENA"
+    status = "NEZNAME"
+
+    pricing_div = soup.select_one("div.product-pricing")
+    if not pricing_div:
+        return price, status
+
+    price_container = pricing_div.select_one(".product-pricing__price")
+    if price_container:
+        ptext = price_container.get_text(" ", strip=True)
+        m = PRICE_PATTERN.search(ptext)
+        if m:
+            price = normalize_price(m.group())
+        elif ptext:
+            # cena este nie je zverejnena (napr. "Cenu ešte nepoznáme")
+            price = ptext
+
+    avail_container = pricing_div.select_one(".product-pricing__availability")
+    text_for_status = avail_container.get_text(" ", strip=True) if avail_container else ""
+    text_for_status = text_for_status.replace("\ufeff", "").strip()
+
+    if not text_for_status and price_container:
+        # fallback: ak sa nenasiel samostatny availability blok, skus
+        # dostupnost vycitat z toho isteho miesta ako cenu (niektore
+        # stranky ("Cenu ešte nepoznáme" / "Očakávame") to majú spolu)
+        text_for_status = price_container.get_text(" ", strip=True)
+
+    if text_for_status:
+        status = text_for_status
+
+    return price, status
+
+
 def send_discord_notification(message: str) -> None:
     content = message
     if DISCORD_USER_ID:
@@ -248,13 +266,17 @@ def main() -> None:
         url = product["url"]
 
         try:
-            page_soup, page_text = get_page_text(url)
+            soup, page_text = get_page(url)
         except requests.RequestException as e:
             print(f"[{name}] Chyba pri nacitavani stranky: {e}")
             continue
 
-        current_price = extract_prices(page_soup, page_text)
-        current_status = extract_status(page_text)
+        domain = urlparse(url).netloc.lower()
+        if "ihrysko.sk" in domain:
+            current_price, current_status = extract_ihrysko(soup)
+        else:
+            current_price = extract_prices(page_text, url)
+            current_status = extract_status(page_text)
 
         last = state.get(name, {})
         last_price = last.get("price")
