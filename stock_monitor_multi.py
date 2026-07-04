@@ -92,14 +92,67 @@ def get_page_text(url: str) -> str:
     soup = BeautifulSoup(resp.text, "html.parser")
     for tag in soup(["script", "style"]):
         tag.decompose()
+
+    # odstranenie widgetov kosika (napr. Angular "priceSummary"/"cartSelected"
+    # v hlavicke stranky) - zobrazuju cenu OBSAHU KOSIKA (typicky 0,00 kym je
+    # prazdny), nie cenu produktu, a bez tejto ochrany by sa s nou zamienali.
+    # POZOR: najprv sa MUSIA zozbierat vsetky tagy na odstranenie do zoznamu
+    # a decompose() zavolat AZ POTOM - inak by decompose() vycistil aj
+    # atributy vnorenych potomkov skor, nez sa k nim cyklus dostane, co
+    # sposobi AttributeError (tag.attrs == None).
+    cart_markers = ("pricesummary", "cartselected", "cart-summary", "minicart")
+    tags_to_remove = []
+    for tag in soup.find_all(True):
+        attrs_text = " ".join(str(v) for v in tag.attrs.values()).lower()
+        if any(marker in attrs_text for marker in cart_markers):
+            tags_to_remove.append(tag)
+    for tag in tags_to_remove:
+        tag.decompose()
+
     # separator "\n" zachova hranice riadkov/blokov, aby sme vedeli
     # oddelit "Dostupnost: X" od nasledujuceho odstavca/poznamky
-    return soup.get_text("\n", strip=True)
+    text = soup.get_text("\n", strip=True)
+    return soup, text
 
 
-def extract_prices(text: str) -> str:
+# Riadky obsahujuce tieto slova sa PRESKOCIA pri hladani ceny - typicky
+# ide o cenu dopravy / prah pre zadarmo dopravu, nie o cenu produktu
+PRICE_LINE_BLACKLIST = ["doprav", "przesyłk", "wysyłk", "shipping"]
+
+
+def extract_prices_from_attributes(soup) -> list:
+    # Najspolahlivejsi sposob: viacere e-shopy pouzivaju strukturovany
+    # atribut data-price priamo na elemente s cenou (napr. Loficards.pl).
+    # Toto je presnejsie ako hladanie textu, kedze sa netreba spoliehat
+    # na to, ci nahodou nie je niekde inde na stranke podobne vyzerajuci
+    # text (kosik, doprava, odporucane produkty...).
+    found = []
+    for tag in soup.find_all(attrs={"data-price": True}):
+        txt = tag.get_text(" ", strip=True)
+        if txt:
+            found.append(normalize_price(txt))
+
+    seen = set()
+    unique = []
+    for price in found:
+        if price not in seen:
+            seen.add(price)
+            unique.append(price)
+    return unique
+
+
+def extract_prices(soup, text: str) -> str:
+    # 1) prioritne skus strukturovany atribut data-price
+    attr_prices = extract_prices_from_attributes(soup)
+    if attr_prices:
+        return " | ".join(attr_prices)
+
+    # 2) fallback: hladanie v texte po riadkoch (s vylucenim dopravy atd.)
     found = []
     for line in text.split("\n"):
+        line_lower = line.lower()
+        if any(bad in line_lower for bad in PRICE_LINE_BLACKLIST):
+            continue
         for m in PRICE_PATTERN.finditer(line):
             found.append(normalize_price(m.group()))
 
@@ -181,12 +234,12 @@ def main() -> None:
         url = product["url"]
 
         try:
-            page_text = get_page_text(url)
+            page_soup, page_text = get_page_text(url)
         except requests.RequestException as e:
             print(f"[{name}] Chyba pri nacitavani stranky: {e}")
             continue
 
-        current_price = extract_prices(page_text)
+        current_price = extract_prices(page_soup, page_text)
         current_status = extract_status(page_text)
 
         last = state.get(name, {})
