@@ -1,0 +1,46 @@
+{
+  "Cardstore - 30th Celebration - Elite Trainer Box": {
+    "price": "1 Kč | 50 Kč",
+    "status": "Připravujeme"
+  },
+  "Cardstore - 30th Celebration - Ultra Premium Collection (Espeon)": {
+    "price": "1 Kč | 50 Kč",
+    "status": "Připravujeme"
+  },
+  "Cardstore - 30th Celebration - Ultra Premium Collection (Umbreon)": {
+    "price": "1 Kč | 50 Kč",
+    "status": "Připravujeme"
+  },
+  "Loficards - Elite Trainer Box": {
+    "price": "0.01 | 15 | 18",
+    "status": "Brak towaru"
+  },
+  "Loficards - Ex Box Sylveon ex": {
+    "price": "0.01 | 15 | 18",
+    "status": "Brak towaru"
+  },
+  "Loficards - Ex Box Greninja ex": {
+    "price": "0.01 | 15 | 18",
+    "status": "Brak towaru"
+  },
+  "Ihrysko - Elite Trainer Box": {
+    "price": "70,00 € | 3,59 €",
+    "status": "tohto produktu je určený limit 1ks na zákazníka."
+  },
+  "Ihrysko - Battle Deck Espeon": {
+    "price": "70,00 € | 3,59 €",
+    "status": "tohto produktu je určený lim"
+  },
+  "Ihrysko - Battle Deck Umbreon": {
+    "price": "70,00 € | 3,59 € | 37,99 €",
+    "status": "tohto produktu je určený lim"
+  },
+  "Ihrysko - Ultra Premium Collection Night (Umbreon)": {
+    "price": "70,00 € | 3,59 €",
+    "status": "tohto produktu je určený lim"
+  },
+  "Ihrysko - Ultra Premium Collection Day (Espeon)": {
+    "price": "70,00 € | 3,59 €",
+    "status": "tohto produktu je určený lim"
+  }
+}
