@@ -126,6 +126,24 @@ def get_page(url: str):
     # separator "\n" zachova hranice riadkov/blokov, aby sme vedeli
     # oddelit "Dostupnost: X" od nasledujuceho odstavca/poznamky
     text = soup.get_text("\n", strip=True)
+
+    # DOLEZITE: takmer kazdy e-shop ma v hlavicke "mini kosik" s odznakom
+    # typu "0,00 €" / "0,00 zł" (aktualna suma v kosiku). Tento odznak MA
+    # menu pripojenu k cislu rovnako ako skutocna cena produktu, takze ho
+    # vie regex omylom zachytit ako cenu (typicky vtedy zhodou okolnosti
+    # nepodchytene, ked je aj realna cena produktu 0 - napr. Vesely Drak
+    # predobjednavky - ale pri realnej nenulovej cene by uz doslo k
+    # zmieseniu oboch hodnot). Preto orezeme text tak, aby zacinal az pri
+    # nadpise produktu (h1) - hlavicka/navigacia/kosik su v HTML vzdy PRED
+    # nadpisom produktu, takze tymto ich z hladania ceny/stavu vyradime.
+    h1 = soup.find("h1")
+    if h1:
+        h1_text = h1.get_text(strip=True)
+        if h1_text:
+            idx = text.find(h1_text)
+            if idx != -1:
+                text = text[idx:]
+
     return soup, text
 
 
